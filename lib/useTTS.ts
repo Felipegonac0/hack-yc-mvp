@@ -38,11 +38,15 @@ export function useTTS() {
         body: JSON.stringify({ text: cleanText }),
       })
 
-      if (!response.ok) throw new Error('TTS failed')
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`TTS route failed: ${errText}`)
+      }
 
       // Reuse pre-warmed context if available; create one as fallback
+      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-        audioContextRef.current = new AudioContext()
+        audioContextRef.current = new AC()
       }
       const audioContext = audioContextRef.current
 
@@ -51,62 +55,24 @@ export function useTTS() {
         await audioContext.resume()
       }
 
-      const reader = response.body!.getReader()
-      let buffer = new Uint8Array(0)
-      const CHUNK_SIZE = 32768
-      let nextStartTime = audioContext.currentTime
-      let lastSource: AudioBufferSourceNode | null = null
+      // Collect the full response before decoding — partial MP3 chunks
+      // cannot be reliably decoded by decodeAudioData.
+      const arrayBuffer = await response.arrayBuffer()
+      console.log('[TTS] received', arrayBuffer.byteLength, 'bytes')
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+      console.log('[TTS] decoded, duration', audioBuffer.duration, 's')
 
-      const scheduleChunk = async (chunk: Uint8Array) => {
-        const merged = new Uint8Array(buffer.length + chunk.length)
-        merged.set(buffer)
-        merged.set(chunk, buffer.length)
-        buffer = merged
-
-        if (buffer.length >= CHUNK_SIZE) {
-          try {
-            const audioBuffer = await audioContext.decodeAudioData(buffer.buffer.slice(0))
-            const source = audioContext.createBufferSource()
-            source.buffer = audioBuffer
-            source.connect(audioContext.destination)
-            if (nextStartTime < audioContext.currentTime) nextStartTime = audioContext.currentTime
-            source.start(nextStartTime)
-            nextStartTime += audioBuffer.duration
-            currentSourceRef.current = source
-            lastSource = source
-            buffer = new Uint8Array(0)
-          } catch {
-            // chunk not yet decodable — keep accumulating
-          }
-        }
-      }
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) {
-          // Flush remaining bytes
-          if (buffer.length > 0) {
-            try {
-              const audioBuffer = await audioContext.decodeAudioData(buffer.buffer.slice(0))
-              const source = audioContext.createBufferSource()
-              source.buffer = audioBuffer
-              source.connect(audioContext.destination)
-              if (nextStartTime < audioContext.currentTime) nextStartTime = audioContext.currentTime
-              source.start(nextStartTime)
-              lastSource = source
-            } catch { /* ignore */ }
-          }
-          if (lastSource) {
-            lastSource.onended = () => setIsSpeaking(false)
-          } else {
-            setIsSpeaking(false)
-          }
-          break
-        }
-        if (value) await scheduleChunk(value)
+      const source = audioContext.createBufferSource()
+      source.buffer = audioBuffer
+      source.connect(audioContext.destination)
+      source.start()
+      currentSourceRef.current = source
+      source.onended = () => {
+        currentSourceRef.current = null
+        setIsSpeaking(false)
       }
     } catch (err) {
-      console.warn('ElevenLabs TTS failed, falling back to speechSynthesis:', err)
+      console.error('[TTS] failed, falling back to speechSynthesis:', err)
       const utterance = new SpeechSynthesisUtterance(cleanText)
       utterance.lang = 'en-US'
       utterance.onend = () => setIsSpeaking(false)

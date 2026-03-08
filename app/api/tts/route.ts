@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         text,
-        model_id: 'eleven_multilingual_v3',
+        model_id: 'eleven_multilingual_v2',
         voice_settings: {
           stability: 0.35,
           similarity_boost: 0.85,
@@ -25,7 +25,9 @@ export async function POST(req: NextRequest) {
   )
 
   if (!elevenRes.ok) {
-    return new Response('TTS failed', { status: 500 })
+    const errBody = await elevenRes.text()
+    console.error('[TTS route] ElevenLabs error', elevenRes.status, errBody)
+    return new Response(`ElevenLabs error ${elevenRes.status}: ${errBody}`, { status: 500 })
   }
 
   return new Response(elevenRes.body, {
