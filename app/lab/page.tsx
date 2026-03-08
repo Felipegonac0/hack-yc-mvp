@@ -271,7 +271,7 @@ function TranscriptBubble({ entry }: { entry: TranscriptEntry }) {
           border: isUser ? 'none' : `1px solid ${C.border}`,
           boxShadow: isUser ? '0 2px 14px rgba(0,163,255,0.3)' : 'none',
         }}>
-          {displayText}
+          {isUser ? displayText : renderMarkdown(displayText)}
         </div>
         {calcs.length > 0 && (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -749,13 +749,24 @@ export default function LabPage() {
       const res = await fetch(`/api/export/${format}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report }),
+        body: JSON.stringify({ markdown: report }),
       })
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = `lab-report.${format}`; a.click()
-      URL.revokeObjectURL(url)
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+
+      if (format === 'pdf') {
+        // PDF route returns HTML with window.print() — open in new tab
+        const html = await res.text()
+        const blob = new Blob([html], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        window.open(url, '_blank')
+        setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      } else {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = `lab-report.${format}`; a.click()
+        URL.revokeObjectURL(url)
+      }
     } catch (e) {
       console.error('[handleExport]', e)
     }

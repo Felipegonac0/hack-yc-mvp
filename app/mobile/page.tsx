@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback, KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, useCallback, KeyboardEvent, ReactNode } from 'react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,56 @@ function parseCalcsFromText(text: string): Calculation[] {
   return out
 }
 
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+
+function inlineFormat(text: string): ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g)
+  return parts.map((p, i) => {
+    if (p.startsWith('**') && p.endsWith('**'))
+      return <strong key={i} style={{ color: '#E8F4FD', fontWeight: 700 }}>{p.slice(2, -2)}</strong>
+    if (p.startsWith('*') && p.endsWith('*'))
+      return <em key={i}>{p.slice(1, -1)}</em>
+    if (p.startsWith('`') && p.endsWith('`'))
+      return <code key={i} style={{ fontFamily: 'var(--font-jetbrains,monospace)', fontSize: '0.85em', color: '#00A3FF', background: 'rgba(0,163,255,0.12)', padding: '1px 5px', borderRadius: 4 }}>{p.slice(1, -1)}</code>
+    return p
+  })
+}
+
+function renderMarkdown(md: string): ReactNode {
+  const lines = md.split('\n')
+  const elems: ReactNode[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.startsWith('## ')) {
+      elems.push(<div key={i} style={{ fontSize: 13, fontWeight: 700, color: '#00A3FF', marginTop: 10, marginBottom: 2, letterSpacing: '0.04em' }}>{line.slice(3)}</div>)
+    } else if (line.startsWith('### ')) {
+      elems.push(<div key={i} style={{ fontSize: 13, fontWeight: 600, color: '#E8F4FD', marginTop: 8, marginBottom: 2 }}>{line.slice(4)}</div>)
+    } else if (/^[-*] /.test(line)) {
+      elems.push(
+        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
+          <span style={{ color: '#00A3FF', flexShrink: 0, marginTop: 1 }}>•</span>
+          <span style={{ fontSize: 14, color: '#C8DFF0', lineHeight: 1.55 }}>{inlineFormat(line.slice(2))}</span>
+        </div>
+      )
+    } else if (/^\d+\. /.test(line)) {
+      const num = line.match(/^(\d+)\. /)?.[1] ?? ''
+      elems.push(
+        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
+          <span style={{ color: '#00A3FF', flexShrink: 0, fontWeight: 600, minWidth: 16, textAlign: 'right' }}>{num}.</span>
+          <span style={{ fontSize: 14, color: '#C8DFF0', lineHeight: 1.55 }}>{inlineFormat(line.replace(/^\d+\. /, ''))}</span>
+        </div>
+      )
+    } else if (line.trim() === '') {
+      elems.push(<div key={i} style={{ height: 6 }} />)
+    } else {
+      elems.push(<p key={i} style={{ fontSize: 14, color: '#C8DFF0', lineHeight: 1.6, margin: '1px 0' }}>{inlineFormat(line)}</p>)
+    }
+    i++
+  }
+  return <div style={{ display: 'flex', flexDirection: 'column' }}>{elems}</div>
+}
+
 // ─── Transcript Bubble ────────────────────────────────────────────────────────
 
 function TranscriptBubble({ msg }: { msg: LocalMessage }) {
@@ -93,7 +143,7 @@ function TranscriptBubble({ msg }: { msg: LocalMessage }) {
           border: isUser ? 'none' : '1px solid #1E3A5F',
           boxShadow: isUser ? '0 2px 12px rgba(0,163,255,0.3)' : 'none',
         }}>
-          {msg.text}
+          {isUser ? msg.text : renderMarkdown(msg.text)}
         </div>
         {!isUser && msg.calculations && msg.calculations.length > 0 && (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
