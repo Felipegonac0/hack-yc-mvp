@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback, KeyboardEvent, ReactNode } from 'react'
+import { useTTS } from '@/lib/useTTS'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -107,9 +108,24 @@ function renderMarkdown(md: string): ReactNode {
   return <div style={{ display: 'flex', flexDirection: 'column' }}>{elems}</div>
 }
 
+// ─── Sound Wave Indicator ─────────────────────────────────────────────────────
+
+function SoundWave() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 14, marginLeft: 4 }}>
+      {[0, 0.15, 0.3].map((delay, i) => (
+        <div key={i} style={{
+          width: 3, borderRadius: 2, background: '#00A3FF',
+          animation: `soundBar 0.9s ${delay}s ease-in-out infinite`,
+        }} />
+      ))}
+    </div>
+  )
+}
+
 // ─── Transcript Bubble ────────────────────────────────────────────────────────
 
-function TranscriptBubble({ msg }: { msg: LocalMessage }) {
+function TranscriptBubble({ msg, isActivelySpeaking }: { msg: LocalMessage; isActivelySpeaking?: boolean }) {
   const isUser = msg.role === 'user'
   const time = msg.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
 
@@ -150,7 +166,10 @@ function TranscriptBubble({ msg }: { msg: LocalMessage }) {
             {msg.calculations.map(c => <InlineCalcCard key={c.id} calc={c} />)}
           </div>
         )}
-        <div style={{ fontSize: 11, color: '#7AA8CC', padding: '0 2px' }}>{time}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '0 2px' }}>
+          <span style={{ fontSize: 11, color: '#7AA8CC' }}>{time}</span>
+          {!isUser && isActivelySpeaking && <SoundWave />}
+        </div>
       </div>
     </div>
   )
@@ -269,6 +288,10 @@ export default function MobilePage() {
   const [isLoading, setIsLoading]       = useState(false)
   const [toast, setToast]               = useState<string | null>(null)
   const [isEndingSession, setIsEnding]  = useState(false)
+  const [started, setStarted]           = useState(false)
+  const startedRef                      = useRef(false)
+
+  const { speak, stop, init, isSpeaking } = useTTS()
 
   const lastUpdatedRef    = useRef<string | null>(null)
   const sessionHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
@@ -318,6 +341,9 @@ export default function MobilePage() {
     const trimmed = text.trim()
     if (!trimmed || isLoading) return
 
+    // Interrupt Thala if she's currently speaking
+    stop()
+
     // Init session on first message
     if (!sessionInitRef.current) {
       sessionInitRef.current = true
@@ -360,6 +386,7 @@ export default function MobilePage() {
         calculations: calcs.length > 0 ? calcs : undefined,
       }
       setMessages(prev => [...prev, agentMsg])
+      if (startedRef.current) speak(reply)
     } catch (e) {
       console.error('[sendMessage]', e)
       setMessages(prev => [...prev, {
@@ -370,7 +397,7 @@ export default function MobilePage() {
       // Restore focus to textarea
       setTimeout(() => textareaRef.current?.focus(), 100)
     }
-  }, [isLoading])
+  }, [isLoading, speak, stop])
 
   // ── End session ───────────────────────────────────────────────────────────
 
@@ -424,6 +451,10 @@ export default function MobilePage() {
           0%, 100% { transform: scale(0.7); opacity: 0.4; }
           50%       { transform: scale(1); opacity: 1; }
         }
+        @keyframes soundBar {
+          0%, 100% { height: 4px; opacity: 0.5; }
+          50%       { height: 14px; opacity: 1; }
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { overscroll-behavior: none; }
         ::-webkit-scrollbar { width: 0; }
@@ -435,6 +466,36 @@ export default function MobilePage() {
         background: '#060B18', fontFamily: 'var(--font-inter, sans-serif)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
+
+        {/* ── Tap to begin overlay ──────────────────────────────────────────── */}
+        {!started && (
+          <div
+            onClick={() => { init(); startedRef.current = true; setStarted(true) }}
+            style={{
+              position: 'absolute', inset: 0, zIndex: 999,
+              background: 'rgba(6,11,24,0.97)',
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 20,
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #00A3FF 0%, #0044AA 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 28, fontWeight: 800, color: '#fff',
+              boxShadow: '0 0 40px rgba(0,163,255,0.45)',
+            }}>T</div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: 18, fontWeight: 700, color: '#E8F4FD', marginBottom: 8 }}>
+                Hi, I'm Thala
+              </p>
+              <p style={{ fontSize: 14, color: '#7AA8CC', lineHeight: 1.7 }}>
+                Tap anywhere to begin
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Header ────────────────────────────────────────────────────────── */}
         <header style={{
@@ -504,9 +565,16 @@ export default function MobilePage() {
             </div>
           )}
 
-          {messages.map((msg, i) => (
-            <TranscriptBubble key={i} msg={msg} />
-          ))}
+          {messages.map((msg, i) => {
+            const isLatestAgent = msg.role === 'agent' && !messages.slice(i + 1).some(m => m.role === 'agent')
+            return (
+              <TranscriptBubble
+                key={i}
+                msg={msg}
+                isActivelySpeaking={isLatestAgent && isSpeaking}
+              />
+            )
+          })}
 
           {isLoading && <TypingIndicator />}
 
