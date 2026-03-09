@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, KeyboardEvent, ReactNode } from 'react'
 import { useTTS } from '@/lib/useTTS'
+import { useSTT } from '@/lib/useSTT'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -288,16 +289,23 @@ export default function MobilePage() {
   const [isLoading, setIsLoading]       = useState(false)
   const [toast, setToast]               = useState<string | null>(null)
   const [isEndingSession, setIsEnding]  = useState(false)
-  const [started, setStarted]           = useState(false)
-  const startedRef                      = useRef(false)
 
   const { speak, stop, init, isSpeaking } = useTTS()
+
+  const { isListening, interimText, error: sttError, startListening, stopListening } = useSTT({
+    isThalaSpeaking: isSpeaking,
+    onFinalTranscript: (text) => sendMessage(text),
+  })
 
   const lastUpdatedRef    = useRef<string | null>(null)
   const sessionHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const transcriptEndRef  = useRef<HTMLDivElement>(null)
   const textareaRef       = useRef<HTMLTextAreaElement>(null)
   const sessionInitRef    = useRef(false)
+
+  // ── Init TTS on mount ─────────────────────────────────────────────────────
+
+  useEffect(() => { init() }, [init])
 
   // ── Poll session state ────────────────────────────────────────────────────
 
@@ -341,10 +349,8 @@ export default function MobilePage() {
     const trimmed = text.trim()
     if (!trimmed || isLoading) return
 
-    // Interrupt Thala if she's currently speaking
     stop()
 
-    // Init session on first message
     if (!sessionInitRef.current) {
       sessionInitRef.current = true
       fetch('/api/session/update', {
@@ -386,7 +392,7 @@ export default function MobilePage() {
         calculations: calcs.length > 0 ? calcs : undefined,
       }
       setMessages(prev => [...prev, agentMsg])
-      if (startedRef.current) speak(reply)
+      speak(reply)
     } catch (e) {
       console.error('[sendMessage]', e)
       setMessages(prev => [...prev, {
@@ -394,7 +400,6 @@ export default function MobilePage() {
       }])
     } finally {
       setIsLoading(false)
-      // Restore focus to textarea
       setTimeout(() => textareaRef.current?.focus(), 100)
     }
   }, [isLoading, speak, stop])
@@ -429,7 +434,6 @@ export default function MobilePage() {
     }
   }, [inputText, sendMessage])
 
-  // Auto-resize textarea
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const el = e.currentTarget
     el.style.height = 'auto'
@@ -466,36 +470,6 @@ export default function MobilePage() {
         background: '#060B18', fontFamily: 'var(--font-inter, sans-serif)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-
-        {/* ── Tap to begin overlay ──────────────────────────────────────────── */}
-        {!started && (
-          <div
-            onClick={() => { init(); startedRef.current = true; setStarted(true) }}
-            style={{
-              position: 'absolute', inset: 0, zIndex: 999,
-              background: 'rgba(6,11,24,0.97)',
-              display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center', gap: 20,
-              cursor: 'pointer',
-            }}
-          >
-            <div style={{
-              width: 72, height: 72, borderRadius: '50%',
-              background: 'linear-gradient(135deg, #00A3FF 0%, #0044AA 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 28, fontWeight: 800, color: '#fff',
-              boxShadow: '0 0 40px rgba(0,163,255,0.45)',
-            }}>T</div>
-            <div style={{ textAlign: 'center' }}>
-              <p style={{ fontSize: 18, fontWeight: 700, color: '#E8F4FD', marginBottom: 8 }}>
-                Hi, I'm Thala
-              </p>
-              <p style={{ fontSize: 14, color: '#7AA8CC', lineHeight: 1.7 }}>
-                Tap anywhere to begin
-              </p>
-            </div>
-          </div>
-        )}
 
         {/* ── Header ────────────────────────────────────────────────────────── */}
         <header style={{
@@ -546,7 +520,6 @@ export default function MobilePage() {
               alignItems: 'center', justifyContent: 'center',
               padding: '60px 24px', textAlign: 'center', gap: 16,
             }}>
-              {/* Orb */}
               <div style={{
                 width: 64, height: 64, borderRadius: '50%',
                 background: 'linear-gradient(135deg, #00A3FF 0%, #0044AA 100%)',
@@ -586,17 +559,41 @@ export default function MobilePage() {
           flexShrink: 0, borderTop: '1px solid #1E3A5F',
           background: 'rgba(6,11,24,0.98)', padding: '10px 12px 16px',
         }}>
-          {/* Text input row */}
+          {/* Live interim transcript */}
+          {interimText && (
+            <div style={{
+              marginBottom: 6, padding: '8px 16px',
+              background: 'rgba(0,163,255,0.08)', border: '1px solid #1E3A5F',
+              borderRadius: 12, fontSize: 15, color: '#7AA8CC', fontStyle: 'italic',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <div style={{
+                width: 8, height: 8, borderRadius: '50%', background: '#FF4D6A', flexShrink: 0,
+                animation: 'dotPulse 1s ease-in-out infinite',
+              }} />
+              {interimText}…
+            </div>
+          )}
+
+          {/* Status bar */}
+          {(sttError || isListening || isSpeaking) && (
+            <div style={{ marginBottom: 6, fontSize: 13 }}>
+              {sttError && <span style={{ color: '#FF4D6A' }}>{sttError}</span>}
+              {!sttError && isListening && !isSpeaking && <span style={{ color: '#00D4A8' }}>● Listening…</span>}
+              {isSpeaking && <span style={{ color: '#00A3FF' }}>◆ Thala is speaking…</span>}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             <textarea
               ref={textareaRef}
               value={inputText}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
-              placeholder="Message Thala…"
+              placeholder={isListening ? 'Listening…' : 'Message Thala…'}
               rows={1}
               style={{
-                flex: 1, background: '#111D35', border: '1.5px solid #1E3A5F',
+                flex: 1, background: '#111D35', border: `1.5px solid ${isListening ? '#00A3FF' : '#1E3A5F'}`,
                 borderRadius: 14, padding: '11px 14px', color: '#E8F4FD',
                 fontSize: 15, resize: 'none', outline: 'none',
                 fontFamily: 'var(--font-inter, sans-serif)', lineHeight: 1.5,
@@ -604,8 +601,38 @@ export default function MobilePage() {
                 transition: 'border-color 0.2s',
               }}
               onFocus={e => { e.currentTarget.style.borderColor = '#00A3FF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = '#1E3A5F' }}
+              onBlur={e => { if (!isListening) e.currentTarget.style.borderColor = '#1E3A5F' }}
             />
+            {/* Mic button */}
+            <button
+              onClick={isListening ? stopListening : startListening}
+              disabled={isSpeaking}
+              title={isListening ? 'Stop recording' : 'Speak to Thala'}
+              style={{
+                width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                background: isListening ? 'rgba(255,77,106,0.15)' : '#111D35',
+                border: `1.5px solid ${isListening ? '#FF4D6A' : '#1E3A5F'}`,
+                cursor: isSpeaking ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: isListening ? '0 0 12px rgba(255,77,106,0.3)' : 'none',
+                transition: 'all 0.2s', opacity: isSpeaking ? 0.4 : 1,
+              } as React.CSSProperties}
+            >
+              {isListening ? (
+                <div style={{
+                  width: 14, height: 14, borderRadius: '50%', background: '#FF4D6A',
+                  animation: 'dotPulse 1s ease-in-out infinite',
+                }} />
+              ) : (
+                <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#7AA8CC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="2" width="6" height="11" rx="3" />
+                  <path d="M5 10a7 7 0 0 0 14 0" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                  <line x1="8" y1="22" x2="16" y2="22" />
+                </svg>
+              )}
+            </button>
+            {/* Send button */}
             <button
               onClick={() => sendMessage(inputText)}
               disabled={!canSend}
@@ -632,7 +659,6 @@ export default function MobilePage() {
             </button>
           </div>
 
-          {/* End session button — only when active */}
           {isActive && (
             <button
               onClick={handleEndSession}

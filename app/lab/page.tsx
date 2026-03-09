@@ -45,26 +45,6 @@ interface SessionState {
 }
 
 type NotebookTab = 'report' | 'metadata' | 'materials'
-type AppView = 'live' | 'history'
-
-interface SavedTranscriptEntry {
-  role: 'user' | 'agent'
-  text: string
-  timestamp: string
-}
-
-interface SavedConversation {
-  id: string
-  savedAt: string
-  title: string
-  startTime: string | null
-  endTime: string | null
-  transcript: SavedTranscriptEntry[]
-  calculations: Calculation[]
-  materialsUsed: MaterialUsed[]
-  protocol: string | null
-  reportGenerated: string | null
-}
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -696,200 +676,9 @@ function MaterialsTab({ materials }: { materials: MaterialUsed[] }) {
   )
 }
 
-// ─── HistoryPanel ─────────────────────────────────────────────────────────────
-
-function HistoryPanel() {
-  const [conversations, setConversations] = useState<SavedConversation[]>([])
-  const [selected, setSelected] = useState<SavedConversation | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [historyTab, setHistoryTab] = useState<NotebookTab>('report')
-  const [deleting, setDeleting] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch('/api/conversations')
-      if (!res.ok) throw new Error('Failed to load')
-      const data: SavedConversation[] = await res.json()
-      setConversations(data)
-      if (selected) {
-        const updated = data.find(c => c.id === selected.id)
-        setSelected(updated ?? null)
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
-  }, [selected])
-
-  useEffect(() => { load() }, [load])
-
-  const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setDeleting(id)
-    try {
-      await fetch(`/api/conversations/${id}`, { method: 'DELETE' })
-      setConversations(prev => prev.filter(c => c.id !== id))
-      if (selected?.id === id) setSelected(null)
-    } catch {
-      // ignore
-    } finally {
-      setDeleting(null)
-    }
-  }, [selected])
-
-  const historyTabs: { id: NotebookTab; label: string }[] = [
-    { id: 'report', label: 'Report' },
-    { id: 'metadata', label: 'Metadata' },
-    { id: 'materials', label: 'Materials' },
-  ]
-
-  return (
-    <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-      {/* Left: conversation list */}
-      <div style={{ width: 280, minWidth: 220, borderRight: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', background: C.surface, overflow: 'hidden' }}>
-        <div style={{ padding: '0.9rem 1.2rem', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-          <span style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: C.textSecondary }}>
-            Saved Sessions
-          </span>
-          <span style={{ marginLeft: '0.5rem', fontSize: '0.62rem', color: C.textSecondary, fontFamily: 'var(--font-jetbrains,monospace)' }}>
-            {conversations.length}
-          </span>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0' }}>
-          {loading ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: C.textSecondary, fontSize: '0.74rem', opacity: 0.6 }}>Loading…</div>
-          ) : conversations.length === 0 ? (
-            <div style={{ padding: '2rem 1.2rem', textAlign: 'center', color: C.textSecondary, fontSize: '0.74rem', lineHeight: 1.65, opacity: 0.6 }}>
-              No saved sessions yet.<br />Sessions are saved automatically when a report is generated.
-            </div>
-          ) : (
-            conversations.map(conv => {
-              const isSelected = selected?.id === conv.id
-              const date = new Date(conv.savedAt)
-              const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-              const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-              return (
-                <div
-                  key={conv.id}
-                  onClick={() => { setSelected(conv); setHistoryTab('report') }}
-                  style={{
-                    padding: '0.7rem 1.2rem',
-                    cursor: 'pointer',
-                    borderLeft: `3px solid ${isSelected ? C.accent : 'transparent'}`,
-                    background: isSelected ? C.accentGlow : 'transparent',
-                    transition: 'all 0.15s',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.25rem',
-                    position: 'relative',
-                  }}
-                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(30,58,95,0.3)' }}
-                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
-                >
-                  <div style={{ fontSize: '0.74rem', color: isSelected ? C.textPrimary : C.textSecondary, fontWeight: isSelected ? 600 : 400, lineHeight: 1.4, paddingRight: '1.4rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                    {conv.title}
-                  </div>
-                  <div style={{ fontSize: '0.62rem', color: C.textSecondary, opacity: 0.7 }}>
-                    {dateStr} · {timeStr}
-                  </div>
-                  <div style={{ fontSize: '0.6rem', color: C.textSecondary, opacity: 0.55 }}>
-                    {conv.transcript.length} messages · {conv.calculations.length} calcs
-                  </div>
-                  <button
-                    onClick={e => handleDelete(conv.id, e)}
-                    disabled={deleting === conv.id}
-                    style={{
-                      position: 'absolute', top: '0.55rem', right: '0.7rem',
-                      background: 'transparent', border: 'none', cursor: 'pointer',
-                      color: C.textSecondary, padding: '0.2rem', borderRadius: 4,
-                      opacity: deleting === conv.id ? 0.4 : 0.5,
-                      transition: 'all 0.15s', display: 'flex', alignItems: 'center',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.color = C.error; e.currentTarget.style.opacity = '1' }}
-                    onMouseLeave={e => { e.currentTarget.style.color = C.textSecondary; e.currentTarget.style.opacity = '0.5' }}
-                    title="Delete session"
-                  >
-                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
-                    </svg>
-                  </button>
-                </div>
-              )
-            })
-          )}
-        </div>
-      </div>
-
-      {/* Center: transcript */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: `1px solid ${C.border}`, overflow: 'hidden' }}>
-        <div style={{ padding: '0.9rem 1.2rem', borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: C.textSecondary }}>Transcript</span>
-          {selected && (
-            <span style={{ fontSize: '0.68rem', color: C.textSecondary }}>{selected.transcript.length} messages</span>
-          )}
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
-          {!selected ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, opacity: 0.4, gap: '0.6rem' }}>
-              <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              <span style={{ fontSize: '0.78rem' }}>Select a session to view</span>
-            </div>
-          ) : selected.transcript.length === 0 ? (
-            <div style={{ color: C.textSecondary, fontSize: '0.76rem', opacity: 0.5, padding: '2rem', textAlign: 'center' }}>No transcript available</div>
-          ) : (
-            selected.transcript.map((entry, i) => <TranscriptBubble key={i} entry={entry} />)
-          )}
-        </div>
-      </div>
-
-      {/* Right: notebook */}
-      <div style={{ width: '24%', minWidth: 240, background: C.surface, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ padding: '0.9rem 1.2rem 0.7rem', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: C.textSecondary, marginBottom: '0.7rem' }}>Notebook</div>
-          <div style={{ display: 'flex', gap: '0.25rem', background: C.surface2, borderRadius: 20, padding: '0.2rem', border: `1px solid ${C.border}` }}>
-            {historyTabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setHistoryTab(tab.id)}
-                style={{
-                  flex: 1, padding: '0.28rem 0.4rem', borderRadius: 16, border: 'none',
-                  background: historyTab === tab.id ? C.accent : 'transparent',
-                  color: historyTab === tab.id ? '#fff' : C.textSecondary,
-                  fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer',
-                  transition: 'all 0.2s', fontFamily: 'var(--font-inter,sans-serif)',
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.2rem' }}>
-          {!selected ? (
-            <div style={{ color: C.textSecondary, fontSize: '0.74rem', opacity: 0.45, textAlign: 'center', marginTop: '2rem' }}>Select a session</div>
-          ) : historyTab === 'report' ? (
-            <ReportTab report={selected.reportGenerated} isGenerating={false} onExportPdf={() => {}} onExportDocx={() => {}} />
-          ) : historyTab === 'metadata' ? (
-            <MetadataTab
-              session={selected ? { ...selected, isActive: false, lastUpdated: selected.savedAt } as unknown as SessionState : null}
-              calculations={selected?.calculations ?? []}
-            />
-          ) : (
-            <MaterialsTab materials={selected?.materialsUsed ?? []} />
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function LabPage() {
-  const [appView, setAppView] = useState<AppView>('live')
   const [session, setSession] = useState<SessionState | null>(null)
   const [connected, setConnected] = useState(false)
   const [activeTab, setActiveTab] = useState<NotebookTab>('metadata')
@@ -1009,72 +798,81 @@ export default function LabPage() {
 
       <div style={{ display: 'flex', height: '100vh', background: C.bg, fontFamily: 'var(--font-inter,sans-serif)', overflow: 'hidden', flexDirection: 'column' }}>
 
-        {/* ── Top nav bar ──────────────────────────────────────────────────── */}
-        <div style={{ flexShrink: 0, borderBottom: `1px solid ${C.border}`, background: C.surface, display: 'flex', alignItems: 'center', padding: '0 1.2rem', gap: '0.25rem', height: 42, zIndex: 20 }}>
-          {/* Logo / wordmark */}
-          <div style={{ fontSize: '0.75rem', fontWeight: 800, color: C.accent, letterSpacing: '0.1em', textTransform: 'uppercase', marginRight: '1rem' }}>Thala Lab</div>
-
-          {/* View tabs */}
-          {(['live', 'history'] as AppView[]).map(view => (
-            <button
-              key={view}
-              onClick={() => setAppView(view)}
+        {/* ── Live Session Banner ──────────────────────────────────────────── */}
+        {isActive && (
+          <div
+            style={{
+              width: '100%',
+              background: 'rgba(0,212,168,0.08)',
+              borderBottom: `1px solid rgba(0,212,168,0.25)`,
+              padding: '6px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexShrink: 0,
+              zIndex: 10,
+            }}
+          >
+            <span
               style={{
-                padding: '0.28rem 0.85rem', borderRadius: 20, border: 'none', cursor: 'pointer',
-                background: appView === view ? C.accentGlow : 'transparent',
-                color: appView === view ? C.accent : C.textSecondary,
-                fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'capitalize',
-                fontFamily: 'var(--font-inter,sans-serif)',
-                transition: 'all 0.18s',
-                outline: appView === view ? `1px solid rgba(0,163,255,0.35)` : 'none',
+                display: 'inline-block',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: '#00D4A8',
+                boxShadow: '0 0 6px #00D4A8',
+                animation: 'livePulse 1.5s ease-in-out infinite',
+                flexShrink: 0,
               }}
-            >
-              {view === 'live' ? 'Live Session' : 'History'}
-            </button>
-          ))}
-
-          <div style={{ flex: 1 }} />
-
-          {/* Live session status indicators */}
-          {appView === 'live' && isActive && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#00D4A8', boxShadow: '0 0 6px #00D4A8', animation: 'livePulse 1.5s ease-in-out infinite' }} />
-              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#00D4A8', letterSpacing: '0.06em' }}>Live</span>
-              <span style={{ fontSize: '0.65rem', color: 'rgba(0,212,168,0.6)' }}>— session on mobile</span>
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: connected ? '#00D4A8' : C.error, boxShadow: `0 0 5px ${connected ? '#00D4A8' : C.error}`, marginLeft: 8 }} />
-              <span style={{ fontSize: '0.63rem', color: C.textSecondary }}>{connected ? 'Connected' : 'Disconnected'}</span>
-            </div>
-          )}
-        </div>
-
-        {/* ── Content area ─────────────────────────────────────────────────── */}
-        {appView === 'history' ? (
-          <HistoryPanel />
-        ) : (
-          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            {/* Hidden file input */}
-            <input ref={fileInputRef} type="file" accept=".txt,.pdf" style={{ display: 'none' }} onChange={handleFileUpload} />
-
-            {/* LEFT — Protocol */}
-            <ProtocolPanel
-              protocol={session?.protocol ?? null}
-              onUploadClick={() => fileInputRef.current?.click()}
-              isActive={isActive}
             />
-
-            {/* CENTER — Transcript */}
-            <CenterColumn session={session} transcriptEndRef={transcriptEndRef} />
-
-            {/* RIGHT — Notebook */}
-            <NotebookPanel
-              session={session}
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-              onExportPdf={() => handleExport('pdf')}
-              onExportDocx={() => handleExport('docx')}
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#00D4A8', letterSpacing: '0.06em' }}>
+              Live Session in Progress
+            </span>
+            <span style={{ fontSize: '0.68rem', color: 'rgba(0,212,168,0.6)', marginLeft: 4 }}>
+              — conversation is happening on mobile
+            </span>
+            <div style={{ flex: 1 }} />
+            <span
+              style={{
+                display: 'inline-block',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: connected ? '#00D4A8' : C.error,
+                boxShadow: `0 0 6px ${connected ? '#00D4A8' : C.error}`,
+                flexShrink: 0,
+              }}
             />
+            <span style={{ fontSize: '0.65rem', color: C.textSecondary }}>{connected ? 'Connected' : 'Disconnected'}</span>
           </div>
         )}
+
+        {/* ── Three-column layout ──────────────────────────────────────────── */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Hidden file input */}
+          <input ref={fileInputRef} type="file" accept=".txt,.pdf" style={{ display: 'none' }} onChange={handleFileUpload} />
+
+          {/* LEFT — Protocol (only shown after session ends) */}
+          {session && !isActive && session.endTime && (
+            <ProtocolPanel
+              protocol={session.protocol}
+              onUploadClick={() => fileInputRef.current?.click()}
+              isActive={false}
+            />
+          )}
+
+          {/* CENTER — Transcript */}
+          <CenterColumn session={session} transcriptEndRef={transcriptEndRef} />
+
+          {/* RIGHT — Notebook */}
+          <NotebookPanel
+            session={session}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onExportPdf={() => handleExport('pdf')}
+            onExportDocx={() => handleExport('docx')}
+          />
+        </div>
       </div>
     </>
   )
